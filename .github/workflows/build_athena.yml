@@ -1,101 +1,121 @@
-name: Athena Full Auto Build
-run-name: Athena Full Auto Build
+name: Build & Release wrt_release Firmware (Auto Cleanup)
+run-name: Build & Release Firmware
 
 on:
   push:
-    branches: [master]
+    tags:
+      - 'v*.*.*'      # 例如 v1.0.0 触发
   workflow_dispatch:
     inputs:
       model:
-        description: "Device Model"
+        description: "Target Build Model"
         required: true
+        type: choice
         default: jdcloud_ipq60xx_libwrt_athena_homeproxy
+        options:
+          - jdcloud_ipq60xx_libwrt_athena_homeproxy
+          - jdcloud_ipq60xx_libwrt
+          - redmi_ax6_libwrt
 
 jobs:
-  build:
+  build_release:
     runs-on: ubuntu-24.04
     env:
       MODEL: ${{ github.event.inputs.model }}
+      TAG_NAME: ${{ github.ref_name }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        path: wrt_release
         submodules: true
-
-    - name: Show workspace
-      run: |
-        echo "Workspace: $GITHUB_WORKSPACE"
-        ls -R $GITHUB_WORKSPACE
 
     - name: Free disk space
       uses: sbwml/actions@free-disk
 
-    - name: Set Build Date
-      run: |
-        sudo timedatectl set-timezone "Asia/Shanghai"
-        export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
-        echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-
-    - name: Install dependencies
+    - name: Install build dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib \
-          flex gettext unzip python3-dev python3-setuptools python3-venv rsync wget file libssl-dev \
-          subversion dos2unix libfuse-dev
+        sudo apt install -y build-essential git-core libncurses5-dev zlib1g-dev \
+          gawk gcc-multilib flex gettext unzip python3-dev python3-setuptools \
+          python3-venv rsync wget file libssl-dev subversion dos2unix libfuse-dev jq
 
-    - name: Prepare Athena Config and Enable HomeProxy
+    - name: Set Build Date
       run: |
-        CONFIG_FILE="$GITHUB_WORKSPACE/wrt_release/deconfig/${MODEL}.config"
+        export BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")
+        echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+
+    - name: Prepare Build Config
+      run: |
+        CONFIG_FILE="deconfig/${MODEL}.config"
         if [ ! -f "$CONFIG_FILE" ]; then
-          echo "Error: Config file $CONFIG_FILE not found!"
+          echo "Error: $CONFIG_FILE not found!"
           exit 1
         fi
-        cp "$CONFIG_FILE" "$GITHUB_WORKSPACE/wrt_release/.config"
-        cd $GITHUB_WORKSPACE/wrt_release
-        # 保证 diffconfig 正确合并
+        cp "$CONFIG_FILE" .config
         scripts/diffconfig.sh > .config
-        # 自动启用 HomeProxy 插件
+        # 自动启用 HomeProxy
         echo "CONFIG_PACKAGE_homeproxy=y" >> .config
-        echo "Athena config prepared with HomeProxy."
+        echo "Build config ready for $MODEL"
 
     - name: Update feeds
       run: |
-        cd $GITHUB_WORKSPACE/wrt_release
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Cache Dependencies
+    - name: Cache build artifacts
       uses: actions/cache@v4
       with:
         path: |
-          $GITHUB_WORKSPACE/wrt_release/dl
-          $GITHUB_WORKSPACE/wrt_release/build_dir
-          $GITHUB_WORKSPACE/wrt_release/staging_dir
-          $GITHUB_WORKSPACE/wrt_release/.ccache
-        key: ${{ runner.os }}-build-${{ github.event.inputs.model }}-${{ hashFiles('wrt_release/deconfig/**') }}
+          dl
+          build_dir
+          staging_dir
+          .ccache
+        key: ${{ runner.os }}-wrt_${{ env.MODEL }}-${{ hashFiles('deconfig/**') }}
         restore-keys: |
-          ${{ runner.os }}-build-${{ github.event.inputs.model }}-
+          ${{ runner.os }}-wrt_${{ env.MODEL }}-
 
     - name: Build Firmware
       run: |
-        cd $GITHUB_WORKSPACE/wrt_release
         make defconfig
         make -j$(nproc) V=s
 
-    - name: Upload Firmware
-      uses: actions/upload-artifact@v4
-      with:
-        name: Athena_${{ env.MODEL }}_${{ env.BUILD_DATE }}
-        path: $GITHUB_WORKSPACE/wrt_release/bin/targets/qualcommax/ipq60xx/*.bin
-
-    - name: Clean old artifacts
+    - name: Collect Firmware
       run: |
-        # 仅保留最近 5 个固件
-        echo "Cleaning old artifacts..."
-        gh auth login --with-token <<< ${{ secrets.GITHUB_TOKEN }}
-        artifacts=$(gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts | sort_by(.created_at) | reverse | .[5:] | .[].id')
-        for id in $artifacts; do
-          gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$id
+        mkdir -p release_bin
+        cp bin/targets/**/* release_bin/ || true
+        tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz release_bin/
+        echo "Firmware archived."
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Firmware ${{ github.ref_name }} - ${{ env.MODEL }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload Firmware to Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: firmware_${MODEL}_${BUILD_DATE}.tar.gz
+        asset_name: firmware_${MODEL}_${BUILD_DATE}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Cleanup Old Releases (Keep latest 5)
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        echo "Cleaning old releases, keeping latest 5..."
+        # 登录 GH API
+        gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+        releases=$(gh api repos/${{ github.repository }}/releases --jq '. | sort_by(.created_at) | reverse | .[5:] | .[].id')
+        for rid in $releases; do
+          echo "Deleting old release $rid"
+          gh api -X DELETE repos/${{ github.repository }}/releases/$rid
         done
