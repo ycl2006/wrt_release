@@ -1,0 +1,4 @@
+- name: Build JDCloud Athena
+  run: |
+    chmod +x build_athena.sh
+    ./build_athena.sh
