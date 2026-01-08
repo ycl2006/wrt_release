@@ -26,26 +26,32 @@ jobs:
       OUTPUT_DIR: release_bin
 
     steps:
-      # 1️⃣ 拉取仓库
+      # 1️⃣ 拉取仓库（确保分支正确，并拉取子模块）
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: true
+          ref: main                 # 确保拉取你的 main 分支
+          submodules: recursive     # 拉取所有子模块
 
-      # 2️⃣ Debug 输出，确认路径
-      - name: Debug Workspace
+      # 2️⃣ Debug 输出，确认仓库文件
+      - name: List repository files
         run: |
           echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
           echo "Listing root of workspace:"
           ls -l "$GITHUB_WORKSPACE"
           echo "Listing deconfig folder:"
-          ls -l "$GITHUB_WORKSPACE/deconfig" || echo "❌ deconfig folder not found!"
+          if [ -d "$GITHUB_WORKSPACE/deconfig" ]; then
+            ls -l "$GITHUB_WORKSPACE/deconfig"
+          else
+            echo "❌ deconfig folder does not exist!"
+            exit 1
+          fi
 
       # 3️⃣ 释放磁盘空间
       - name: Free disk space
         uses: sbwml/actions@free-disk
 
-      # 4️⃣ 安装官方 libwrt/ImmortalWrt 完整依赖
+      # 4️⃣ 安装完整 LibWRT/ImmortalWrt 编译依赖
       - name: Install full LibWRT build dependencies
         run: |
           sudo apt update -y
@@ -57,7 +63,7 @@ jobs:
             genisoimage msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip libpython3-dev qemu-utils \
             rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      # 5️⃣ 初始化 ImmortalWrt 官方编译环境（可选，但推荐）
+      # 5️⃣ 初始化 ImmortalWrt 官方编译环境（可选）
       - name: Initialize ImmortalWrt Build Environment
         run: |
           sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
@@ -74,16 +80,14 @@ jobs:
           echo "Using config file: $CONFIG_FILE"
           if [ ! -f "$CONFIG_FILE" ]; then
             echo "❌ Error: Config file $CONFIG_FILE not found!"
-            ls -l "$GITHUB_WORKSPACE/deconfig/"
+            ls -l "$GITHUB_WORKSPACE/deconfig"
             exit 1
           fi
           cp "$CONFIG_FILE" "$GITHUB_WORKSPACE/.config"
           cd "$GITHUB_WORKSPACE"
-          # 如果 diffconfig.sh 存在就执行
           if [ -f scripts/diffconfig.sh ]; then
             scripts/diffconfig.sh > .config
           fi
-          # 自动启用 HomeProxy
           echo "CONFIG_PACKAGE_homeproxy=y" >> .config
           echo "✅ Build config ready for $MODEL"
 
@@ -118,7 +122,6 @@ jobs:
       - name: Collect Firmware
         run: |
           mkdir -p $OUTPUT_DIR
-          # 只复制存在的 bin 文件
           find $GITHUB_WORKSPACE/bin/targets -type f -name '*.bin' -exec cp --parents {} $OUTPUT_DIR/ \;
           tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz $OUTPUT_DIR/
           echo "✅ Firmware archived: firmware_${MODEL}_${BUILD_DATE}.tar.gz"
