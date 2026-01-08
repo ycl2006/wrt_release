@@ -33,10 +33,12 @@ jobs:
           ref: main
           submodules: recursive
 
-      # 2️⃣ Clone 官方 LibWRT 仓库
+      # 2️⃣ Clone 官方 LibWRT 仓库（使用 GITHUB_TOKEN）
       - name: Clone LibWRT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth=1 https://github.com/libwrt/libwrt.git "$GITHUB_WORKSPACE/libwrt"
+          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/libwrt/libwrt.git "$GITHUB_WORKSPACE/libwrt"
 
       # 3️⃣ 拷贝你的 deconfig 文件
       - name: Copy deconfig
@@ -44,7 +46,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/libwrt/deconfig"
           cp "$GITHUB_WORKSPACE/deconfig/${MODEL}.config" "$GITHUB_WORKSPACE/libwrt/deconfig/"
 
-      # 4️⃣ 安装依赖
+      # 4️⃣ 安装完整依赖
       - name: Install build dependencies
         run: |
           sudo apt update -y
