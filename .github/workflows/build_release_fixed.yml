@@ -11,7 +11,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Show workspace
+    - name: Show workspace (debug)
       run: |
         pwd
         ls -lah
@@ -29,26 +29,26 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          libwrt/dl
-          libwrt/build_dir
-          libwrt/staging_dir
+          dl
+          build_dir
+          staging_dir
         key: wrt-release-ipq60xx-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
         restore-keys: |
           wrt-release-ipq60xx-${{ runner.os }}-
 
     - name: Load config
       run: |
-        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config libwrt/.config
-        make -C libwrt defconfig
+        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
+        make defconfig
 
     - name: Build firmware
       run: |
-        make -C libwrt -j$(nproc)
+        make -j$(nproc)
 
     - name: Pack firmware
       run: |
         mkdir -p artifact
-        cp -r libwrt/bin artifact/
+        cp -r bin/targets artifact/
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -62,6 +62,6 @@ jobs:
         tag_name: wrt_release-${{ github.run_number }}
         name: wrt_release JDCloud ipq60xx #${{ github.run_number }}
         files: |
-          artifact/bin/**/*
+          artifact/targets/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
