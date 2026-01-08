@@ -29,10 +29,10 @@ jobs:
       with:
         submodules: true
 
-    - name: Show workspace
+    - name: Show workspace and files
       run: |
-        echo "Workspace: $GITHUB_WORKSPACE"
-        ls -R $GITHUB_WORKSPACE
+        echo "Current directory: $(pwd)"
+        ls -R
 
     - name: Free disk space
       uses: sbwml/actions@free-disk
@@ -53,7 +53,7 @@ jobs:
 
     - name: Prepare Athena Config
       run: |
-        CONFIG_PATH="$GITHUB_WORKSPACE/deconfig/${MODEL}.config"
+        CONFIG_PATH="deconfig/${MODEL}.config"
         if [ -f "$CONFIG_PATH" ]; then
           cp "$CONFIG_PATH" .config
           scripts/diffconfig.sh > .config
@@ -91,7 +91,6 @@ jobs:
         name: Athena_${{ env.MODEL }}_${{ env.BUILD_DATE }}
         path: bin/targets/qualcommax/ipq60xx/*.bin
 
-    - name: Clean old cache (optional)
+    - name: Optional: Clean old cache
       run: |
-        echo "Cleaning old caches..."
-        # 这里可选择清理不需要的缓存或日志
+        echo "Optional: you can clean old caches here if needed."
