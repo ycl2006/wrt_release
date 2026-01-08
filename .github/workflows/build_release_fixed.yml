@@ -20,124 +20,119 @@ on:
 jobs:
   build_release:
     runs-on: ubuntu-24.04
+
     env:
       MODEL: ${{ github.event.inputs.model }}
       TAG_NAME: ${{ github.ref_name }}
       OUTPUT_DIR: release_bin
 
     steps:
-      # 1️⃣ Checkout 你的仓库（包含 deconfig）
+      # 1️⃣ Checkout 你的仓库（含 deconfig）
       - name: Checkout user repo
         uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
 
-      # 2️⃣ Clone 官方 LibWRT 仓库（LiBwrt/openwrt-6.x，main-nss 分支）
+      # 2️⃣ 释放磁盘（非常重要）
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache
+          df -h
+
+      # 3️⃣ Clone LibWRT
       - name: Clone LibWRT
         run: |
           git clone --depth=1 -b main-nss https://github.com/LiBwrt/openwrt-6.x.git "$GITHUB_WORKSPACE/libwrt"
 
-      # 3️⃣ 拷贝你的 deconfig 文件
+      # 4️⃣ 拷贝 deconfig
       - name: Copy deconfig
         run: |
           mkdir -p "$GITHUB_WORKSPACE/libwrt/deconfig"
           cp "$GITHUB_WORKSPACE/deconfig/${MODEL}.config" "$GITHUB_WORKSPACE/libwrt/deconfig/"
 
-      # 4️⃣ 安装完整依赖
+      # 5️⃣ 安装依赖（⚠️ 不 full-upgrade）
       - name: Install build dependencies
         run: |
           sudo apt update -y
-          sudo apt full-upgrade -y
-          sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
-            git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
-            libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev libfuse-dev libssl-dev libtool lrzsz \
-            genisoimage msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip libpython3-dev qemu-utils \
-            rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+          sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint \
+            binutils bison build-essential bzip2 ccache cmake cpio curl \
+            device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+            git gperf haveged help2man intltool libc6-dev-i386 libelf-dev \
+            libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
+            libncurses5-dev libncursesw5-dev libreadline-dev libssl-dev \
+            libtool lrzsz genisoimage msmtp ninja-build p7zip p7zip-full \
+            patch pkgconf python3 python3-pip libpython3-dev qemu-utils \
+            rsync scons squashfs-tools subversion swig texinfo uglifyjs \
+            upx-ucl unzip wget xmlto xxd zlib1g-dev
 
-      # 5️⃣ 初始化 LibWRT 构建环境
+      # 6️⃣ 初始化构建环境
       - name: Initialize LibWRT environment
         run: |
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)
 
-      # 6️⃣ 设置构建日期
+      # 7️⃣ 设置构建时间
       - name: Set Build Date
         run: |
           echo "BUILD_DATE=$(date +'%y.%m.%d_%H.%M.%S')" >> $GITHUB_ENV
 
-      # 7️⃣ 准备配置文件
+      # 8️⃣ 准备 .config
       - name: Prepare Build Config
         run: |
           cd "$GITHUB_WORKSPACE/libwrt"
           CONFIG_FILE="deconfig/${MODEL}.config"
-          echo "Using config file: $CONFIG_FILE"
-          if [ ! -f "$CONFIG_FILE" ]; then
-            echo "❌ Config file $CONFIG_FILE not found!"
-            exit 1
-          fi
+          echo "Using config: $CONFIG_FILE"
+          test -f "$CONFIG_FILE" || exit 1
           cp "$CONFIG_FILE" .config
-          if [ -f scripts/diffconfig.sh ]; then
-            scripts/diffconfig.sh > .config
-          fi
+          make defconfig
           echo "CONFIG_PACKAGE_homeproxy=y" >> .config
-          echo "✅ Build config ready for $MODEL"
 
-      # 8️⃣ 更新 feeds
+      # 9️⃣ feeds
       - name: Update feeds
         run: |
           cd "$GITHUB_WORKSPACE/libwrt"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 9️⃣ 缓存构建目录
+      # 🔟 Cache（稳定 key）
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
           path: |
-            $GITHUB_WORKSPACE/libwrt/dl
-            $GITHUB_WORKSPACE/libwrt/build_dir
-            $GITHUB_WORKSPACE/libwrt/staging_dir
-            $GITHUB_WORKSPACE/libwrt/.ccache
-          key: ${{ runner.os }}-libwrt_${{ env.MODEL }}-${{ hashFiles('deconfig/**') }}
+            libwrt/dl
+            libwrt/build_dir
+            libwrt/staging_dir
+            libwrt/.ccache
+          key: ${{ runner.os }}-libwrt-${{ env.MODEL }}-${{ hashFiles('libwrt/.config') }}
           restore-keys: |
-            ${{ runner.os }}-libwrt_${{ env.MODEL }}-
+            ${{ runner.os }}-libwrt-${{ env.MODEL }}-
 
-      # 🔟 编译固件
+      # 1️⃣1️⃣ 编译（核心：-j1 + 心跳）
       - name: Build Firmware
         run: |
           cd "$GITHUB_WORKSPACE/libwrt"
-          make defconfig
-          make -j$(nproc) V=s
+          while true; do echo "⏳ still building..."; sleep 60; done &
+          make -j1 V=s
 
-      # 1️⃣1️⃣ 收集固件
+      # 1️⃣2️⃣ 收集固件
       - name: Collect Firmware
         run: |
           cd "$GITHUB_WORKSPACE/libwrt"
-          mkdir -p $OUTPUT_DIR
-          cp -r bin/targets/* $OUTPUT_DIR/ || true
-          tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz $OUTPUT_DIR/
-          echo "✅ Firmware archived: firmware_${MODEL}_${BUILD_DATE}.tar.gz"
+          mkdir -p "$OUTPUT_DIR"
+          cp -r bin/targets/* "$OUTPUT_DIR/" || true
+          tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz "$OUTPUT_DIR/"
 
-      # 1️⃣2️⃣ 创建 Release
+      # 1️⃣3️⃣ Release
       - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+        id: release
         if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: Firmware ${{ github.ref_name }} - ${{ env.MODEL }}
-          draft: false
-          prerelease: false
+          files: firmware_${MODEL}_${BUILD_DATE}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 1️⃣3️⃣ 上传固件到 Release
-      - name: Upload Firmware to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: firmware_${MODEL}_${BUILD_DATE}.tar.gz
-          asset_name: firmware_${MODEL}_${BUILD_DATE}.tar.gz
-          asset_content_type: application/gzip
