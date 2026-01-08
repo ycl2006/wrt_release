@@ -99,15 +99,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-libwrt-${{ env.MODEL }}-
 
-      # 9️⃣ 编译固件（✅ 修正，加入 prereq）
+      # 9️⃣ 编译固件（Hosted Runner 版，使用 FORCE=1）
       - name: Build Firmware
         run: |
           cd "$GITHUB_WORKSPACE/libwrt"
-          echo "🛠 Preparing prerequisites..."
-          make prereq              # 新增，生成 host 工具链依赖
-          echo "⏳ Starting firmware build..."
+          echo "⏳ Starting firmware build with FORCE=1..."
           while true; do echo "⏳ still building..."; sleep 60; done &
-          make -j1 V=s             # 单线程构建，稳定
+          make FORCE=1 -j1 V=s   # 强制跳过 prereq，单线程稳定
 
       # 🔟 收集固件
       - name: Collect Firmware
