@@ -33,12 +33,10 @@ jobs:
           ref: main
           submodules: recursive
 
-      # 2️⃣ Clone 官方 LibWRT 仓库（使用 GITHUB_TOKEN）
+      # 2️⃣ Clone 官方 LibWRT 仓库（LiBwrt/openwrt-6.x，main-nss 分支）
       - name: Clone LibWRT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/libwrt/libwrt.git "$GITHUB_WORKSPACE/libwrt"
+          git clone --depth=1 -b main-nss https://github.com/LiBwrt/openwrt-6.x.git "$GITHUB_WORKSPACE/libwrt"
 
       # 3️⃣ 拷贝你的 deconfig 文件
       - name: Copy deconfig
