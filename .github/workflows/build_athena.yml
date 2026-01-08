@@ -2,7 +2,9 @@ name: Build Athena Firmware
 run-name: Build Athena - ${{ env.MODEL }}
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [master]   # push 到 master 自动触发
+  workflow_dispatch:     # 手动触发也可以
 
 env:
   MODEL: jdcloud_ipq60xx_libwrt_athena_homeproxy
@@ -10,84 +12,46 @@ env:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Free disk space
-        uses: sbwml/actions@free-disk
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Build System Setup
-        run: |
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-          sudo -E apt -yqq install dos2unix libfuse-dev
-          sudo -E apt -yqq autoremove --purge
-          sudo -E apt -yqq autoclean
-          sudo -E apt -yqq clean
-          sudo -E systemctl daemon-reload
+    - name: Free disk space
+      uses: sbwml/actions@free-disk
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: true
+    - name: Set Build Date and Timezone
+      run: |
+        sudo timedatectl set-timezone "Asia/Shanghai"
+        export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
+        echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
 
-      - name: Set Build Date and Timezone
-        run: |
-          sudo -E timedatectl set-timezone "Asia/Shanghai"
-          export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib flex gettext unzip python3-distutils python3-setuptools rsync wget file libssl-dev subversion dos2unix libfuse-dev
 
-      - name: Prepare Athena Config
-        run: |
-          mkdir -p deconfig
-          # 拷贝雅典娜 HomeProxy 配置
-          cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
-          # 应用 diffconfig（仓库脚本）
-          scripts/diffconfig.sh > .config
+    - name: Prepare Athena Config
+      run: |
+        mkdir -p deconfig
+        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
+        scripts/diffconfig.sh > .config
 
-      - name: Cache Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ./action_build/.ccache
-            ./action_build/staging_dir
-          key: ${{ matrix.os }}-athena-${{ env.BUILD_DATE }}
-          restore-keys: |
-            ${{ matrix.os }}-athena-
+    - name: Update feeds
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-      - name: Refresh the cache
-        run: |
-          if [ -d "./action_build/staging_dir" ]; then
-            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
-                find "$dir" -type f -exec touch {} +
-            done
-          fi
+    - name: Build Firmware
+      run: |
+        make defconfig
+        make -j$(nproc) V=s
 
-      - name: Build Firmware
-        run: |
-          ./build.sh $MODEL
-
-      - name: Delete Old Cache
-        run: |
-          gh cache list --key ${{ matrix.os }}-athena- --json key --jq '.[] | .key' | while read -r key; do
-            gh cache delete "$key"
-          done
-          echo "========cache status========"
-          echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
-          echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
-
-      - name: Machine Information
-        run: |
-          echo "=============================================="
-          lscpu | grep -E "name|Core|Thread"
-          echo "=============================================="
-          df -h
-          echo "=============================================="
-
-      - name: Upload Firmware
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.BUILD_DATE }}_athena
-          path: ./firmware/*.*
+    - name: Upload Firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.BUILD_DATE }}_athena_homeproxy
+        path: bin/targets/qualcommax/ipq60xx/*.bin
