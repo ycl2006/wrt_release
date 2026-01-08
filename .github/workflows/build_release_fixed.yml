@@ -32,11 +32,20 @@ jobs:
         with:
           submodules: true
 
-      # 2️⃣ 释放磁盘空间
+      # 2️⃣ 打印 debug，确认路径
+      - name: Debug Workspace
+        run: |
+          echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
+          echo "Listing root of workspace:"
+          ls -l "$GITHUB_WORKSPACE"
+          echo "Listing deconfig folder:"
+          ls -l "$GITHUB_WORKSPACE/deconfig" || echo "❌ deconfig folder not found!"
+
+      # 3️⃣ 释放磁盘空间
       - name: Free disk space
         uses: sbwml/actions@free-disk
 
-      # 3️⃣ 安装依赖
+      # 4️⃣ 安装基础依赖
       - name: Install build dependencies
         run: |
           sudo apt update
@@ -44,15 +53,21 @@ jobs:
             gawk gcc-multilib flex gettext unzip python3-dev python3-setuptools \
             python3-venv rsync wget file libssl-dev subversion dos2unix libfuse-dev jq
 
-      # 4️⃣ 设置构建日期
+      # 5️⃣ 初始化 ImmortalWrt 官方编译环境（可选）
+      - name: Initialize ImmortalWrt Build Environment
+        run: |
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+      # 6️⃣ 设置构建日期
       - name: Set Build Date
         run: |
           echo "BUILD_DATE=$(date +'%y.%m.%d_%H.%M.%S')" >> $GITHUB_ENV
 
-      # 5️⃣ 准备配置文件
+      # 7️⃣ 准备配置文件
       - name: Prepare Build Config
         run: |
           CONFIG_FILE="$GITHUB_WORKSPACE/deconfig/${MODEL}.config"
+          echo "Using config file: $CONFIG_FILE"
           if [ ! -f "$CONFIG_FILE" ]; then
             echo "❌ Error: Config file $CONFIG_FILE not found!"
             ls -l "$GITHUB_WORKSPACE/deconfig/"
@@ -60,7 +75,7 @@ jobs:
           fi
           cp "$CONFIG_FILE" "$GITHUB_WORKSPACE/.config"
           cd "$GITHUB_WORKSPACE"
-          # 如果 diffconfig.sh 不存在就跳过
+          # 如果 diffconfig.sh 存在就执行
           if [ -f scripts/diffconfig.sh ]; then
             scripts/diffconfig.sh > .config
           fi
@@ -68,14 +83,14 @@ jobs:
           echo "CONFIG_PACKAGE_homeproxy=y" >> .config
           echo "✅ Build config ready for $MODEL"
 
-      # 6️⃣ 更新 feeds
+      # 8️⃣ 更新 feeds
       - name: Update feeds
         run: |
           cd "$GITHUB_WORKSPACE"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 7️⃣ 缓存构建目录
+      # 9️⃣ 缓存构建目录
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
@@ -88,14 +103,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-wrt_${{ env.MODEL }}-
 
-      # 8️⃣ 编译固件
+      # 🔟 编译固件
       - name: Build Firmware
         run: |
           cd "$GITHUB_WORKSPACE"
           make defconfig
           make -j$(nproc) V=s
 
-      # 9️⃣ 收集固件
+      # 1️⃣1️⃣ 收集固件
       - name: Collect Firmware
         run: |
           mkdir -p $OUTPUT_DIR
@@ -104,7 +119,7 @@ jobs:
           tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz $OUTPUT_DIR/
           echo "✅ Firmware archived: firmware_${MODEL}_${BUILD_DATE}.tar.gz"
 
-      # 🔟 创建 GitHub Release
+      # 1️⃣2️⃣ 创建 GitHub Release
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -117,7 +132,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1️⃣1️⃣ 上传固件到 Release
+      # 1️⃣3️⃣ 上传固件到 Release
       - name: Upload Firmware to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-release-asset@v1
@@ -127,7 +142,7 @@ jobs:
           asset_name: firmware_${MODEL}_${BUILD_DATE}.tar.gz
           asset_content_type: application/gzip
 
-      # 1️⃣2️⃣ 清理旧 Release，只保留最新 5 个
+      # 1️⃣4️⃣ 清理旧 Release，只保留最新 5 个
       - name: Cleanup Old Releases (Keep latest 5)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
