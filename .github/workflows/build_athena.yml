@@ -18,6 +18,11 @@ jobs:
       with:
         submodules: true
 
+    - name: Show current directory & files
+      run: |
+        echo "Workspace: $GITHUB_WORKSPACE"
+        ls -R $GITHUB_WORKSPACE
+
     - name: Free disk space
       uses: sbwml/actions@free-disk
 
@@ -37,8 +42,15 @@ jobs:
 
     - name: Prepare Athena Config
       run: |
-        cp deconfig/${MODEL}.config .config
-        scripts/diffconfig.sh > .config
+        CONFIG_PATH="$GITHUB_WORKSPACE/deconfig/${MODEL}.config"
+        if [ -f "$CONFIG_PATH" ]; then
+          cp "$CONFIG_PATH" .config
+          scripts/diffconfig.sh > .config
+          echo "Config $CONFIG_PATH copied successfully."
+        else
+          echo "Error: Config file $CONFIG_PATH not found!"
+          exit 1
+        fi
 
     - name: Update feeds
       run: |
