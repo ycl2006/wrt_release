@@ -11,7 +11,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Show workspace (debug)
+    - name: Show workspace
       run: |
         pwd
         ls -lah
@@ -39,7 +39,6 @@ jobs:
     - name: Load config
       run: |
         cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
-        make defconfig
 
     - name: Build firmware
       run: |
@@ -48,7 +47,7 @@ jobs:
     - name: Pack firmware
       run: |
         mkdir -p artifact
-        cp -r bin/targets artifact/
+        cp -r bin artifact/
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -62,6 +61,6 @@ jobs:
         tag_name: wrt_release-${{ github.run_number }}
         name: wrt_release JDCloud ipq60xx #${{ github.run_number }}
         files: |
-          artifact/targets/**/*
+          artifact/bin/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
