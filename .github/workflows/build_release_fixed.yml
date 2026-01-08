@@ -1,4 +1,4 @@
-name: Build libwrt & Release (JDCloud ipq60xx)
+name: Build wrt_release (JDCloud ipq60xx)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Show workspace (debug once)
+    - name: Show workspace
       run: |
         pwd
         ls -lah
@@ -29,44 +29,39 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          dl
-          build_dir
-          staging_dir
-        key: libwrt-ipq60xx-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
+          libwrt/dl
+          libwrt/build_dir
+          libwrt/staging_dir
+        key: wrt-release-ipq60xx-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
         restore-keys: |
-          libwrt-ipq60xx-${{ runner.os }}-
-
-    - name: Prepare feeds
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+          wrt-release-ipq60xx-${{ runner.os }}-
 
     - name: Load config
       run: |
-        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
-        make defconfig
+        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config libwrt/.config
+        make -C libwrt defconfig
 
     - name: Build firmware
       run: |
-        make -j$(nproc)
+        make -C libwrt -j$(nproc)
 
     - name: Pack firmware
       run: |
         mkdir -p artifact
-        cp -r bin/targets artifact/
+        cp -r libwrt/bin artifact/
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: libwrt-ipq60xx
+        name: wrt_release-ipq60xx
         path: artifact/
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: libwrt-${{ github.run_number }}
-        name: libwrt JDCloud ipq60xx #${{ github.run_number }}
+        tag_name: wrt_release-${{ github.run_number }}
+        name: wrt_release JDCloud ipq60xx #${{ github.run_number }}
         files: |
-          artifact/targets/**/*
+          artifact/bin/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
