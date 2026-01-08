@@ -1,4 +1,4 @@
-name: Build wrt_release (JDCloud ipq60xx)
+name: Build wrt_release (auto detect Makefile)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     - name: Show workspace
       run: |
         pwd
-        ls -lah
+        find . -maxdepth 3 -type f -name Makefile
 
     - name: Install build dependencies
       run: |
@@ -29,25 +29,33 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          dl
-          build_dir
-          staging_dir
-        key: wrt-release-ipq60xx-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
+          **/dl
+          **/build_dir
+          **/staging_dir
+        key: wrt-release-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
         restore-keys: |
-          wrt-release-ipq60xx-${{ runner.os }}-
+          wrt-release-${{ runner.os }}-
+
+    - name: Locate build root
+      id: findroot
+      run: |
+        ROOT=$(dirname "$(find . -name Makefile | head -n 1)")
+        echo "Build root: $ROOT"
+        echo "root=$ROOT" >> $GITHUB_OUTPUT
 
     - name: Load config
       run: |
-        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
+        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config \
+           "${{ steps.findroot.outputs.root }}/.config"
 
     - name: Build firmware
       run: |
-        make -j$(nproc)
+        make -C "${{ steps.findroot.outputs.root }}" -j$(nproc)
 
     - name: Pack firmware
       run: |
         mkdir -p artifact
-        cp -r bin artifact/
+        find . -type d -name targets -exec cp -r {} artifact/ \;
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -61,6 +69,6 @@ jobs:
         tag_name: wrt_release-${{ github.run_number }}
         name: wrt_release JDCloud ipq60xx #${{ github.run_number }}
         files: |
-          artifact/bin/**/*
+          artifact/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
