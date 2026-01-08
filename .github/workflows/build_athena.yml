@@ -1,8 +1,14 @@
 name: Build Athena Firmware
+run-name: Build Athena - ${{ env.MODEL }}
+
 on:
   push:
-    branches: [master]  # push 到 master 自动触发
+    branches: [master]   # push 到 master 自动触发
   workflow_dispatch:     # 手动触发也可
+
+env:
+  MODEL: jdcloud_ipq60xx_libwrt_athena_homeproxy
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
@@ -14,6 +20,9 @@ jobs:
       with:
         submodules: true
 
+    - name: Free disk space
+      uses: sbwml/actions@free-disk
+
     - name: Set Build Date and Timezone
       run: |
         sudo timedatectl set-timezone "Asia/Shanghai"
@@ -23,7 +32,10 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib flex gettext unzip python3-distutils python3-setuptools rsync wget file libssl-dev subversion dos2unix libfuse-dev
+        sudo apt install -y \
+          build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib flex gettext unzip \
+          python3-dev python3-setuptools python3-venv rsync wget file libssl-dev subversion \
+          dos2unix libfuse-dev
 
     - name: Prepare Athena Config
       run: |
