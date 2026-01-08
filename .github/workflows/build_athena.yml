@@ -1,5 +1,5 @@
-name: Advanced Athena Build
-run-name: Advanced Athena Build
+name: Athena Full Auto Build
+run-name: Athena Full Auto Build
 
 on:
   push:
@@ -10,12 +10,6 @@ on:
         description: "Device Model"
         required: true
         default: jdcloud_ipq60xx_libwrt_athena_homeproxy
-        type: choice
-        options:
-          - jdcloud_ipq60xx_libwrt_athena_homeproxy
-          - jdcloud_ax6000_libwrt
-          - redmi_ax6_libwrt
-          # 可扩展其他设备
 
 jobs:
   build:
@@ -27,12 +21,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
+        path: wrt_release
         submodules: true
 
-    - name: Show workspace and files
+    - name: Show workspace
       run: |
-        echo "Current directory: $(pwd)"
-        ls -R
+        echo "Workspace: $GITHUB_WORKSPACE"
+        ls -R $GITHUB_WORKSPACE
 
     - name: Free disk space
       uses: sbwml/actions@free-disk
@@ -46,25 +41,28 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib flex gettext unzip \
-          python3-dev python3-setuptools python3-venv rsync wget file libssl-dev subversion \
-          dos2unix libfuse-dev
+        sudo apt install -y build-essential git-core libncurses5-dev zlib1g-dev gawk gcc-multilib \
+          flex gettext unzip python3-dev python3-setuptools python3-venv rsync wget file libssl-dev \
+          subversion dos2unix libfuse-dev
 
-    - name: Prepare Athena Config
+    - name: Prepare Athena Config and Enable HomeProxy
       run: |
-        CONFIG_PATH="deconfig/${MODEL}.config"
-        if [ -f "$CONFIG_PATH" ]; then
-          cp "$CONFIG_PATH" .config
-          scripts/diffconfig.sh > .config
-          echo "Config $CONFIG_PATH copied successfully."
-        else
-          echo "Error: Config file $CONFIG_PATH not found!"
+        CONFIG_FILE="$GITHUB_WORKSPACE/wrt_release/deconfig/${MODEL}.config"
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "Error: Config file $CONFIG_FILE not found!"
           exit 1
         fi
+        cp "$CONFIG_FILE" "$GITHUB_WORKSPACE/wrt_release/.config"
+        cd $GITHUB_WORKSPACE/wrt_release
+        # 保证 diffconfig 正确合并
+        scripts/diffconfig.sh > .config
+        # 自动启用 HomeProxy 插件
+        echo "CONFIG_PACKAGE_homeproxy=y" >> .config
+        echo "Athena config prepared with HomeProxy."
 
     - name: Update feeds
       run: |
+        cd $GITHUB_WORKSPACE/wrt_release
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -72,16 +70,17 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          ./dl
-          ./build_dir
-          ./staging_dir
-          .ccache
-        key: ${{ runner.os }}-build-${{ github.event.inputs.model }}-${{ hashFiles('deconfig/**') }}
+          $GITHUB_WORKSPACE/wrt_release/dl
+          $GITHUB_WORKSPACE/wrt_release/build_dir
+          $GITHUB_WORKSPACE/wrt_release/staging_dir
+          $GITHUB_WORKSPACE/wrt_release/.ccache
+        key: ${{ runner.os }}-build-${{ github.event.inputs.model }}-${{ hashFiles('wrt_release/deconfig/**') }}
         restore-keys: |
           ${{ runner.os }}-build-${{ github.event.inputs.model }}-
 
     - name: Build Firmware
       run: |
+        cd $GITHUB_WORKSPACE/wrt_release
         make defconfig
         make -j$(nproc) V=s
 
@@ -89,8 +88,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Athena_${{ env.MODEL }}_${{ env.BUILD_DATE }}
-        path: bin/targets/qualcommax/ipq60xx/*.bin
+        path: $GITHUB_WORKSPACE/wrt_release/bin/targets/qualcommax/ipq60xx/*.bin
 
-    - name: Optional: Clean old cache
+    - name: Clean old artifacts
       run: |
-        echo "Optional: you can clean old caches here if needed."
+        # 仅保留最近 5 个固件
+        echo "Cleaning old artifacts..."
+        gh auth login --with-token <<< ${{ secrets.GITHUB_TOKEN }}
+        artifacts=$(gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts | sort_by(.created_at) | reverse | .[5:] | .[].id')
+        for id in $artifacts; do
+          gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$id
+        done
