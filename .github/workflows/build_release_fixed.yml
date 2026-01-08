@@ -1,4 +1,4 @@
-name: Build & Release wrt_release Firmware (LibWRT Full Environment)
+name: Build & Release wrt_release Firmware (Debug + Full Env)
 run-name: Build & Release Firmware
 
 on:
@@ -26,32 +26,30 @@ jobs:
       OUTPUT_DIR: release_bin
 
     steps:
-      # 1️⃣ 拉取仓库（确保分支正确，并拉取子模块）
+      # 1️⃣ Checkout 仓库，明确分支并拉取子模块
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main                 # 确保拉取你的 main 分支
-          submodules: recursive     # 拉取所有子模块
+          ref: main                # 明确拉取 main 分支
+          submodules: recursive    # 拉取所有子模块
 
-      # 2️⃣ Debug 输出，确认仓库文件
-      - name: List repository files
+      # 2️⃣ Debug 输出，确认仓库和 deconfig
+      - name: Debug repository structure
         run: |
           echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
           echo "Listing root of workspace:"
           ls -l "$GITHUB_WORKSPACE"
-          echo "Listing deconfig folder:"
+          echo "Listing all files recursively:"
+          ls -R "$GITHUB_WORKSPACE"
           if [ -d "$GITHUB_WORKSPACE/deconfig" ]; then
+            echo "✅ deconfig folder exists, contents:"
             ls -l "$GITHUB_WORKSPACE/deconfig"
           else
             echo "❌ deconfig folder does not exist!"
             exit 1
           fi
 
-      # 3️⃣ 释放磁盘空间
-      - name: Free disk space
-        uses: sbwml/actions@free-disk
-
-      # 4️⃣ 安装完整 LibWRT/ImmortalWrt 编译依赖
+      # 3️⃣ 安装完整 LibWRT 编译依赖
       - name: Install full LibWRT build dependencies
         run: |
           sudo apt update -y
@@ -63,18 +61,18 @@ jobs:
             genisoimage msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip libpython3-dev qemu-utils \
             rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      # 5️⃣ 初始化 ImmortalWrt 官方编译环境（可选）
+      # 4️⃣ 初始化 ImmortalWrt 官方环境
       - name: Initialize ImmortalWrt Build Environment
         run: |
           sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
 
-      # 6️⃣ 设置构建日期
+      # 5️⃣ 设置构建日期
       - name: Set Build Date
         run: |
           echo "BUILD_DATE=$(date +'%y.%m.%d_%H.%M.%S')" >> $GITHUB_ENV
 
-      # 7️⃣ 准备配置文件
-      - name: Prepare Build Config
+      # 6️⃣ 检查配置文件
+      - name: Check config file
         run: |
           CONFIG_FILE="$GITHUB_WORKSPACE/deconfig/${MODEL}.config"
           echo "Using config file: $CONFIG_FILE"
@@ -91,14 +89,14 @@ jobs:
           echo "CONFIG_PACKAGE_homeproxy=y" >> .config
           echo "✅ Build config ready for $MODEL"
 
-      # 8️⃣ 更新 feeds
+      # 7️⃣ 更新 feeds
       - name: Update feeds
         run: |
           cd "$GITHUB_WORKSPACE"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 9️⃣ 缓存构建目录
+      # 8️⃣ 缓存构建目录
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
@@ -111,14 +109,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-wrt_${{ env.MODEL }}-
 
-      # 🔟 编译固件
+      # 9️⃣ 编译固件
       - name: Build Firmware
         run: |
           cd "$GITHUB_WORKSPACE"
           make defconfig
           make -j$(nproc) V=s
 
-      # 1️⃣1️⃣ 收集固件
+      # 🔟 收集固件
       - name: Collect Firmware
         run: |
           mkdir -p $OUTPUT_DIR
@@ -126,7 +124,7 @@ jobs:
           tar -czvf firmware_${MODEL}_${BUILD_DATE}.tar.gz $OUTPUT_DIR/
           echo "✅ Firmware archived: firmware_${MODEL}_${BUILD_DATE}.tar.gz"
 
-      # 1️⃣2️⃣ 创建 GitHub Release
+      # 1️⃣1️⃣ 创建 GitHub Release
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -139,7 +137,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1️⃣3️⃣ 上传固件到 Release
+      # 1️⃣2️⃣ 上传固件到 Release
       - name: Upload Firmware to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-release-asset@v1
@@ -149,7 +147,7 @@ jobs:
           asset_name: firmware_${MODEL}_${BUILD_DATE}.tar.gz
           asset_content_type: application/gzip
 
-      # 1️⃣4️⃣ 清理旧 Release，只保留最新 5 个
+      # 1️⃣3️⃣ 清理旧 Release，只保留最新 5 个
       - name: Cleanup Old Releases (Keep latest 5)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
