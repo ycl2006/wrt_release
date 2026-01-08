@@ -11,6 +11,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Show workspace (debug once)
+      run: |
+        pwd
+        ls -lah
+
     - name: Install build dependencies
       run: |
         sudo apt update
@@ -24,34 +29,31 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          libwrt/dl
-          libwrt/build_dir
-          libwrt/staging_dir
+          dl
+          build_dir
+          staging_dir
         key: libwrt-ipq60xx-${{ runner.os }}-${{ hashFiles('deconfig/*.config') }}
         restore-keys: |
           libwrt-ipq60xx-${{ runner.os }}-
 
     - name: Prepare feeds
       run: |
-        cd libwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     - name: Load config
       run: |
-        cd libwrt
-        cp ../deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
+        cp deconfig/jdcloud_ipq60xx_libwrt_athena_homeproxy.config .config
         make defconfig
 
     - name: Build firmware
       run: |
-        cd libwrt
         make -j$(nproc)
 
     - name: Pack firmware
       run: |
         mkdir -p artifact
-        cp -r libwrt/bin/targets artifact/
+        cp -r bin/targets artifact/
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
