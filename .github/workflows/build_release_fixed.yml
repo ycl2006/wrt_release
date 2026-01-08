@@ -69,11 +69,6 @@ jobs:
             rsync scons squashfs-tools subversion swig texinfo uglifyjs \
             upx-ucl unzip wget xmlto xxd zlib1g-dev
 
-      # 6️⃣ 初始化构建环境
-      - name: Initialize LibWRT environment
-        run: |
-          sudo bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)
-
       # 7️⃣ 设置构建时间
       - name: Set Build Date
         run: |
