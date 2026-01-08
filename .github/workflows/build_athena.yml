@@ -1,16 +1,27 @@
-name: Build Athena Firmware
-run-name: Build Athena Firmware
+name: Advanced Athena Build
+run-name: Advanced Athena Build
 
 on:
   push:
-    branches: [master]   # push 到 master 自动触发
-  workflow_dispatch:     # 手动触发也可
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Device Model"
+        required: true
+        default: jdcloud_ipq60xx_libwrt_athena_homeproxy
+        type: choice
+        options:
+          - jdcloud_ipq60xx_libwrt_athena_homeproxy
+          - jdcloud_ax6000_libwrt
+          - redmi_ax6_libwrt
+          # 可扩展其他设备
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      MODEL: jdcloud_ipq60xx_libwrt_athena_homeproxy
+      MODEL: ${{ github.event.inputs.model }}
 
     steps:
     - name: Checkout repository
@@ -18,7 +29,7 @@ jobs:
       with:
         submodules: true
 
-    - name: Show current directory & files
+    - name: Show workspace
       run: |
         echo "Workspace: $GITHUB_WORKSPACE"
         ls -R $GITHUB_WORKSPACE
@@ -26,7 +37,7 @@ jobs:
     - name: Free disk space
       uses: sbwml/actions@free-disk
 
-    - name: Set Build Date and Timezone
+    - name: Set Build Date
       run: |
         sudo timedatectl set-timezone "Asia/Shanghai"
         export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
@@ -57,6 +68,18 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    - name: Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ./dl
+          ./build_dir
+          ./staging_dir
+          .ccache
+        key: ${{ runner.os }}-build-${{ github.event.inputs.model }}-${{ hashFiles('deconfig/**') }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ github.event.inputs.model }}-
+
     - name: Build Firmware
       run: |
         make defconfig
@@ -65,5 +88,10 @@ jobs:
     - name: Upload Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.BUILD_DATE }}_${{ env.MODEL }}
+        name: Athena_${{ env.MODEL }}_${{ env.BUILD_DATE }}
         path: bin/targets/qualcommax/ipq60xx/*.bin
+
+    - name: Clean old cache (optional)
+      run: |
+        echo "Cleaning old caches..."
+        # 这里可选择清理不需要的缓存或日志
