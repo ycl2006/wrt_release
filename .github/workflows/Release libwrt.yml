@@ -1,137 +1,139 @@
-name: Release libwrt
-run-name: Release - ${{ inputs.model }}
+name: Build WRT
+run-name: Build - ${{ inputs.model }}
 
 on:
   workflow_dispatch:
     inputs:
       model:
         required: true
-        description: Device Model (libwrt ini)
+        description: Device Model
         type: choice
-        default: jdcloud_ipq60xx_libwrt_athena_homeproxy
+        default: jdcloud_ipq60xx_immwrt
         options:
-          - jdcloud_ipq60xx_libwrt_athena_homeproxy
+          - aliyun_ap8220_immwrt
+          - cmcc_rax3000m_immwrt
+          - gemtek_w1701k_immwrt
+          - jdcloud_ax6000_immwrt
+          - jdcloud_ipq60xx_immwrt
+          - jdcloud_ipq60xx_libwrt
+          - linksys_mx4x00_immwrt
+          - qihoo_360v6_immwrt
+          - redmi_ax5_immwrt
+          - redmi_ax6_immwrt
+          - redmi_ax6_libwrt
+          - redmi_ax6000_immwrt21
+          - zn_m2_immwrt
+          - zn_m2_libwrt
+          - x64_immwrt
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DEBIAN_FRONTEND: noninteractive
+  CCACHE_DIR: ${{ github.workspace }}/action_build/.ccache
+  CCACHE_MAXSIZE: 5G
 
 jobs:
   build:
-    runs-on: ubuntu-24.04   # ★ 关键：不要再用 22.04 / 24.04
+    runs-on: ubuntu-22.04
 
     steps:
+      # 1️⃣ 释放磁盘（基础）
       - name: Free disk space
         uses: sbwml/actions@free-disk
 
-      - name: Checkout wrt_release
+      # 2️⃣ 额外磁盘 + swap + ccache 优化（核心）
+      - name: Optimize runner
+        run: |
+          echo "== Disk cleanup =="
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          sudo apt-get clean
+
+          echo "== Setup swap =="
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+          echo "== Setup ccache =="
+          sudo apt-get update -qq
+          sudo apt-get install -y ccache
+          ccache -M 5G
+          ccache -z
+
+      # 3️⃣ 构建环境（immortalwrt 官方）
+      - name: Build System Setup
+        run: |
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          sudo -E apt -yqq install dos2unix libfuse-dev
+          sudo -E apt -yqq autoremove --purge
+          sudo -E apt -yqq autoclean
+          sudo -E systemctl daemon-reload
+
+      # 4️⃣ 拉取仓库
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # =================================================
-      # APT HARD RESET（核心止血）
-      # =================================================
-      - name: Fix APT environment
+      # 5️⃣ 时间 / 构建标识
+      - name: Set Build Date and Timezone
         run: |
-          set -euxo pipefail
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /var/cache/apt/archives/*
-          sudo dpkg --configure -a || true
-          sudo apt-get clean
-          sudo apt-get update
-
-      # =================================================
-      # Build Environment（绝对稳）
-      # =================================================
-      - name: Install build dependencies
-        run: |
-          set -euxo pipefail
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext \
-            git libncurses-dev libssl-dev python3 \
-            rsync unzip zlib1g-dev file wget \
-            dos2unix libfuse-dev ca-certificates
-
-      # =================================================
-      # Time & Build Info
-      # =================================================
-      - name: Set Build Date and Info
-        run: |
-          sudo timedatectl set-timezone "Asia/Shanghai"
+          sudo -E timedatectl set-timezone "Asia/Shanghai"
           BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
 
-          BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/${{ inputs.model }}.ini")
-          echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
-
-      # =================================================
-      # Pre Clone
-      # =================================================
+      # 6️⃣ 预处理（选择源码 / config）
       - name: Pre Clone
-        run: |
-          chmod +x pre_clone_action.sh
-          ./pre_clone_action.sh ${{ inputs.model }}
+        run: ./pre_clone_action.sh ${{ inputs.model }}
 
-      # =================================================
-      # Cache
-      # =================================================
-      - name: Cache build dependencies
+      # 7️⃣ 缓存（ccache + staging）
+      - name: Cache Dependencies
         uses: actions/cache@v4
         with:
           path: |
             ./action_build/.ccache
             ./action_build/staging_dir
-          key: libwrt-${{ runner.os }}-${{ hashFiles(format('compilecfg/{0}.ini', inputs.model)) }}
+          key: ${{ runner.os }}-${{ hashFiles('**/repo_flag') }}
           restore-keys: |
-            libwrt-${{ runner.os }}-
+            ${{ runner.os }}-
 
-      - name: Refresh staging timestamp
+      # 8️⃣ 刷新缓存时间戳（防止误判过期）
+      - name: Refresh the cache
         run: |
           if [ -d "./action_build/staging_dir" ]; then
-            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" \
-              -exec find {} -type f -exec touch {} + \;
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+              find "$dir" -type f -exec touch {} +
+            done
           fi
 
-      # =================================================
-      # Build
-      # =================================================
+      # 9️⃣ 正式编译
       - name: Build Firmware
-        run: |
-          chmod +x build.sh
-          ./build.sh ${{ inputs.model }}
+        run: ./build.sh ${{ inputs.model }}
 
-      # =================================================
-      # Kernel Version
-      # =================================================
-      - name: Get Kernel Version
-        run: |
-          KVER=$(grep -oP "^kernel.*" ./firmware/*.manifest \
-            | grep -oP "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}" | head -n1)
-          echo "KVER=$KVER" >> $GITHUB_ENV
+      # 🔟 显示 ccache 命中率（验证优化是否生效）
+      - name: Show ccache stats
+        run: ccache -s
 
-      # =================================================
-      # Release Body
-      # =================================================
-      - name: Prepare Release Body
+      # 1️⃣1️⃣ 清理旧缓存（防止无限膨胀）
+      - name: Delete Old Cache
         run: |
-          {
-            echo "libwrt 云编译发布"
-            echo ""
-            echo "源码：${BUILD_SRC}"
-            echo "设备：JDCloud RE-CS-02 (ipq60xx)"
-            echo "Kernel：${KVER}"
-            echo ""
-            echo "插件列表："
-            grep -oP "luci-app(-[a-zA-Z0-9]+)+" ./firmware/*.manifest \
-              | awk -F: '{print $NF}' | sort -u
-          } > release_body.txt
+          gh cache list --json key --jq '.[].key' | while read -r key; do
+            gh cache delete "$key" || true
+          done
+          echo "======== cache status ========"
+          du -sh ./action_build/.ccache || true
+          du -sh ./action_build/staging_dir || true
 
-      # =================================================
-      # Release
-      # =================================================
-      - name: Release Firmware
-        uses: softprops/action-gh-release@v2
+      # 1️⃣2️⃣ 机器信息（方便排错）
+      - name: Machine Information
+        run: |
+          echo "=============================================="
+          lscpu | grep -E "Model name|Core|Thread"
+          echo "=============================================="
+          df -h
+          echo "=============================================="
+
+      # 1️⃣3️⃣ 上传固件
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model }}
-          files: ./firmware/*.*
-          body_path: ./release_body.txt
+          name: ${{ env.BUILD_DATE }}_${{ inputs.model }}
+          path: ./firmware/*.*
