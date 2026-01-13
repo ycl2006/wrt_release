@@ -1,6 +1,7 @@
 name: Build WRT
 run-name: Build - ${{ inputs.model }}
 
+
 on:
   workflow_dispatch:
     inputs:
